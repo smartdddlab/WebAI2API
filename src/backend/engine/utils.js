@@ -135,21 +135,63 @@ export async function queryDeep(page, selector, rootHandle = null) {
 /**
  * 计算拟人化的随机点击坐标
  * @param {object} box - 元素边界框 {x, y, width, height}
- * @param {string} [type='random'] - 点击类型: 'input'(偏左偏底部) 或 'random'/'button'(随机)
+ * @param {string} [type='random'] - 点击类型:
+ *   - 'input': 偏左偏底部 (5%-40% x, 60%-90% y)
+ *   - 'center': 中心区域 (40%-60% x, 40%-60% y)
+ *   - 'top-left': 偏左偏上 (10%-30% x, 10%-30% y)
+ *   - 'top-right': 偏右偏上 (70%-90% x, 10%-30% y)
+ *   - 'bottom-right': 偏右偏下 (70%-90% x, 70%-90% y)
+ *   - 'random'/'button': 中心附近随机 (20%-80% x, 20%-80% y)
  * @returns {{x: number, y: number}} 计算出的坐标
  */
 export function getHumanClickPoint(box, type = 'random') {
-    let x, y;
-    if (type === 'input') {
-        // 输入框: 偏左 (5% - 40% 宽度), 偏底部 (60% - 90% 高度)
-        // 偏底部以适应富文本编辑器上方可能有附件预览的情况
-        x = box.x + box.width * random(0.05, 0.4);
-        y = box.y + box.height * random(0.60, 0.90);
-    } else {
-        // 按钮/其他: 中心附近随机 (20% - 80% 宽度/高度)
-        x = box.x + box.width * random(0.2, 0.8);
-        y = box.y + box.height * random(0.2, 0.8);
+    // 确保 box 有有效的尺寸
+    if (!box || box.width <= 0 || box.height <= 0) {
+        return { x: box?.x || 0, y: box?.y || 0 };
     }
+
+    let xRatio, yRatio;
+    switch (type) {
+        case 'input':
+            // 输入框: 偏左 (5% - 40% 宽度), 偏底部 (60% - 90% 高度)
+            xRatio = random(0.05, 0.4);
+            yRatio = random(0.60, 0.90);
+            break;
+        case 'center':
+            // 中心区域
+            xRatio = random(0.4, 0.6);
+            yRatio = random(0.4, 0.6);
+            break;
+        case 'top-left':
+            // 偏左偏上
+            xRatio = random(0.1, 0.3);
+            yRatio = random(0.1, 0.3);
+            break;
+        case 'top-right':
+            // 偏右偏上
+            xRatio = random(0.7, 0.9);
+            yRatio = random(0.1, 0.3);
+            break;
+        case 'bottom-right':
+            // 偏右偏下
+            xRatio = random(0.7, 0.9);
+            yRatio = random(0.7, 0.9);
+            break;
+        default:
+            // 按钮/其他: 中心附近随机 (20% - 80% 宽度/高度)
+            xRatio = random(0.2, 0.8);
+            yRatio = random(0.2, 0.8);
+    }
+
+    // 边界检查：确保点击位置在元素范围内（留 1px 边距）
+    let x = box.x + box.width * xRatio;
+    let y = box.y + box.height * yRatio;
+
+    // 限制在元素边界内（左右各留 1px）
+    x = Math.max(box.x + 1, Math.min(box.x + box.width - 1, x));
+    // 限制在元素边界内（上下各留 1px）
+    y = Math.max(box.y + 1, Math.min(box.y + box.height - 1, y));
+
     return { x, y };
 }
 
@@ -262,9 +304,10 @@ export async function safeClick(page, target, options = {}) {
 
     const doClick = async () => {
         // 1. 首次获取元素（用于滚动和等待稳定）
-        logger.debug('浏览器', `[safeClick] 开始查找: ${selector}`);
+        const logKey = `${selector} ${target} ${options.bias || 'random'}`;
+        logger.debug('浏览器', `[safeClick] 开始查找: ${logKey}`);
         let el = await resolveElement();
-        logger.debug('浏览器', `[safeClick] 已找到元素`);
+        logger.debug('浏览器', `[safeClick] 已找到 ${logKey}`);
 
         // 2. 确保元素在可视区域内
         logger.debug('浏览器', `[safeClick] 滚动到可视区域...`);
