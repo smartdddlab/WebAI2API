@@ -160,7 +160,10 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
             }
 
             logger.info('适配器', '已获取结果，正在下载图片...', meta);
-            const result = await useContextDownload(img, page);
+            const imgDlCfg = config?.backend?.pool?.failover || {};
+            const result = await useContextDownload(img, page, {
+                retries: imgDlCfg.imgDlRetry ? (imgDlCfg.imgDlRetryMaxRetries || 2) : 0
+            });
             if (result.image) {
                 logger.info('适配器', '已下载图片，任务完成', meta);
             }

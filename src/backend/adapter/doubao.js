@@ -29,7 +29,7 @@ const TARGET_URL = 'https://www.doubao.com/chat/';
  * @returns {Promise<{image?: string, error?: string}>}
  */
 async function generate(context, prompt, imgPaths, modelId, meta = {}) {
-    const { page } = context;
+    const { page, config } = context;
 
     // 获取模型配置
     const modelConfig = manifest.models.find(m => m.id === modelId) || manifest.models[0];
@@ -161,7 +161,10 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
         logger.info('适配器', '已获取图片链接，开始下载...', meta);
 
         // 8. 下载图片
-        const downloadResult = await useContextDownload(imageUrl, page);
+        const imgDlCfg = config?.backend?.pool?.failover || {};
+        const downloadResult = await useContextDownload(imageUrl, page, {
+            retries: imgDlCfg.imgDlRetry ? (imgDlCfg.imgDlRetryMaxRetries || 2) : 0
+        });
         if (downloadResult.error) {
             logger.error('适配器', downloadResult.error, meta);
             return downloadResult;

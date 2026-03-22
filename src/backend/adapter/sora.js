@@ -30,7 +30,7 @@ const INPUT_SELECTOR = 'textarea';
  * @returns {Promise<{video?: string, error?: string}>}
  */
 async function generate(context, prompt, imgPaths, modelId, meta = {}) {
-    const { page } = context;
+    const { page, config } = context;
 
     // 用于存储任务 ID 和视频 URL
     let taskId = null;
@@ -199,7 +199,10 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
 
         // 9. 下载视频并转为 base64
         logger.info('适配器', '正在下载视频...', meta);
-        const downloadResult = await useContextDownload(videoUrl, page);
+        const imgDlCfg = config?.backend?.pool?.failover || {};
+        const downloadResult = await useContextDownload(videoUrl, page, {
+            retries: imgDlCfg.imgDlRetry ? (imgDlCfg.imgDlRetryMaxRetries || 2) : 0
+        });
 
         if (downloadResult.error) {
             logger.error('适配器', downloadResult.error, meta);

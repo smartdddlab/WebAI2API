@@ -376,6 +376,32 @@ const handleRemoveWorker = (index) => {
                                 </div>
                             </a-col>
                         </a-row>
+
+                        <a-divider style="margin: 12px 0;" />
+
+                        <a-row :gutter="16">
+                            <a-col :xs="24" :md="12">
+                                <div style="margin-bottom: 8px;">
+                                    <div style="font-weight: 600; margin-bottom: 8px;">图片下载重试</div>
+                                    <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 12px;">
+                                        启用后，图片/视频下载失败时会自动重试下载（不重新生成）
+                                    </div>
+                                    <a-switch v-model:checked="poolConfig.failover.imgDlRetry" />
+                                </div>
+                            </a-col>
+
+                            <a-col :xs="24" :md="12">
+                                <div style="margin-bottom: 8px;">
+                                    <div style="font-weight: 600; margin-bottom: 8px;">下载重试次数</div>
+                                    <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 12px;">
+                                        图片下载失败时的最大重试次数，范围 1-10
+                                    </div>
+                                    <a-input-number v-model:value="poolConfig.failover.imgDlRetryMaxRetries" :min="1"
+                                        :max="10" :disabled="!poolConfig.failover.imgDlRetry" style="width: 100%"
+                                        placeholder="请输入下载重试次数" />
+                                </div>
+                            </a-col>
+                        </a-row>
                     </a-collapse-panel>
                 </a-collapse>
             </div>

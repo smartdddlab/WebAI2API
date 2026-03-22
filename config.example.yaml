@@ -31,8 +31,10 @@ backend:
     # ========================================
     # 当适配器返回网络错误时，自动尝试其他支持相同模型的 Worker
     failover:
-      enabled: true          # 启用故障转移
-      maxRetries: 2          # 最多重试次数 (0=无限制)
+      enabled: true           # 启用故障转移
+      maxRetries: 2           # 最多重试次数 (0=无限制)
+      imgDlRetry: false       # 图片下载器重试，为图片生成结果单独提供重试机会
+      imgDlRetryMaxRetries: 2 # 图片下载器重试次数
 
     # ========================================
     # 生成等待时间

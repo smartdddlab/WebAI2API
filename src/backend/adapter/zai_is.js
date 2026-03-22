@@ -362,7 +362,10 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
         logger.info('适配器', `已提取图片链接: ${imageUrl}`, meta);
 
         // 下载图片
-        const downloadResult = await useContextDownload(imageUrl, page);
+        const imgDlCfg = config?.backend?.pool?.failover || {};
+        const downloadResult = await useContextDownload(imageUrl, page, {
+            retries: imgDlCfg.imgDlRetry ? (imgDlCfg.imgDlRetryMaxRetries || 2) : 0
+        });
         if (downloadResult.error) {
             return downloadResult;
         }

@@ -280,6 +280,12 @@ export function loadConfig() {
     if (config.backend.pool.failover.maxRetries === undefined) {
         config.backend.pool.failover.maxRetries = 2;
     }
+    if (config.backend.pool.failover.imgDlRetry === undefined) {
+        config.backend.pool.failover.imgDlRetry = false;
+    }
+    if (config.backend.pool.failover.imgDlRetryMaxRetries === undefined) {
+        config.backend.pool.failover.imgDlRetryMaxRetries = 2;
+    }
 
     // 校验 instances 配置
     if (!config.backend.pool.instances || !Array.isArray(config.backend.pool.instances)) {

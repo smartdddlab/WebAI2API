@@ -250,6 +250,16 @@ export function validatePoolConfig(data) {
                 errors.push('failover.maxRetries 不能为负数');
             }
         }
+        if (data.failover.imgDlRetry !== undefined && typeof data.failover.imgDlRetry !== 'boolean') {
+            errors.push('failover.imgDlRetry 必须是布尔值');
+        }
+        if (data.failover.imgDlRetryMaxRetries !== undefined) {
+            if (typeof data.failover.imgDlRetryMaxRetries !== 'number' || !Number.isInteger(data.failover.imgDlRetryMaxRetries)) {
+                errors.push('failover.imgDlRetryMaxRetries 必须是整数');
+            } else if (data.failover.imgDlRetryMaxRetries < 1 || data.failover.imgDlRetryMaxRetries > 10) {
+                errors.push('failover.imgDlRetryMaxRetries 必须在 1-10 范围内');
+            }
+        }
     }
 
     return { valid: errors.length === 0, errors };

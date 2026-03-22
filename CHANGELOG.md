@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.5.8] - 2026-03-22
 
 ### ✨ Added
+- **适配器**
+  - 为图片生成结果下载单独提供重试机制以及相关设置
 - **WebUI**
   - 增加批量操作实例设置代理或者删除
 

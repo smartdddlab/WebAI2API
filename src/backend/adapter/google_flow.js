@@ -231,7 +231,10 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
 
         // 11. 下载图片并转为 base64
         logger.info('适配器', '正在下载图片...', meta);
-        const downloadResult = await useContextDownload(imageUrl, page);
+        const imgDlCfg = config?.backend?.pool?.failover || {};
+        const downloadResult = await useContextDownload(imageUrl, page, {
+            retries: imgDlCfg.imgDlRetry ? (imgDlCfg.imgDlRetryMaxRetries || 2) : 0
+        });
 
         if (downloadResult.error) {
             logger.error('适配器', downloadResult.error, meta);

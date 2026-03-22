@@ -179,7 +179,10 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
             logger.info('适配器', `找到 ${imageUrls.length} 张图片，开始下载...`, meta);
 
             // 使用封装的下载函数
-            const result = await useContextDownload(imageUrl, page);
+            const imgDlCfg = config?.backend?.pool?.failover || {};
+            const result = await useContextDownload(imageUrl, page, {
+                retries: imgDlCfg.imgDlRetry ? (imgDlCfg.imgDlRetryMaxRetries || 2) : 0
+            });
             if (result.error) {
                 logger.error('适配器', result.error, meta);
                 return result;

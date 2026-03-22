@@ -10,25 +10,30 @@
  * @param {import('playwright-core').Page} page - Playwright 页面对象
  * @param {object} [options] - 可选配置
  * @param {number} [options.timeout=60000] - 超时时间（毫秒）
+ * @param {number} [options.retries=0] - 下载失败时的重试次数
  * @returns {Promise<{ image?: string, error?: string }>} 下载结果
  */
 export async function useContextDownload(url, page, options = {}) {
-    const { timeout = 60000 } = options;
+    const { timeout = 60000, retries = 0 } = options;
 
-    try {
-        const response = await page.request.get(url, { timeout });
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const response = await page.request.get(url, { timeout });
 
-        if (!response.ok()) {
-            return { error: `下载失败: HTTP ${response.status()}` };
+            if (!response.ok()) {
+                if (attempt < retries) continue;
+                return { error: `下载失败: HTTP ${response.status()}` };
+            }
+
+            const buffer = await response.body();
+            const base64 = buffer.toString('base64');
+            const contentType = response.headers()['content-type'] || 'image/png';
+            const mimeType = contentType.split(';')[0].trim();
+
+            return { image: `data:${mimeType};base64,${base64}` };
+        } catch (e) {
+            if (attempt < retries) continue;
+            return { error: `已获取结果，但图片下载时遇到错误: ${e.message}` };
         }
-
-        const buffer = await response.body();
-        const base64 = buffer.toString('base64');
-        const contentType = response.headers()['content-type'] || 'image/png';
-        const mimeType = contentType.split(';')[0].trim();
-
-        return { image: `data:${mimeType};base64,${base64}` };
-    } catch (e) {
-        return { error: `已获取结果，但图片下载时遇到错误: ${e.message}` };
     }
 }

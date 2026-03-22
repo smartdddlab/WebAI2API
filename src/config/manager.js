@@ -284,7 +284,9 @@ export function getPoolConfig() {
         waitTimeout: pool.waitTimeout != null ? Math.round(pool.waitTimeout / 1000) : 120,
         failover: {
             enabled: failover.enabled !== false, // 默认 true
-            maxRetries: failover.maxRetries ?? 2
+            maxRetries: failover.maxRetries ?? 2,
+            imgDlRetry: failover.imgDlRetry || false,
+            imgDlRetryMaxRetries: failover.imgDlRetryMaxRetries ?? 2
         }
     };
 }
@@ -316,6 +318,12 @@ export function savePoolConfig(data) {
         }
         if (data.failover.maxRetries !== undefined) {
             config.backend.pool.failover.maxRetries = data.failover.maxRetries;
+        }
+        if (data.failover.imgDlRetry !== undefined) {
+            config.backend.pool.failover.imgDlRetry = data.failover.imgDlRetry;
+        }
+        if (data.failover.imgDlRetryMaxRetries !== undefined) {
+            config.backend.pool.failover.imgDlRetryMaxRetries = data.failover.imgDlRetryMaxRetries;
         }
     }
 
