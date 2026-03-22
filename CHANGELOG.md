@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.8] - 2026-03-22
+
+### 🐛 Fixed
+- **适配器**
+  - 修复豆包适配器无法点击选择模型的问题
+
+## [3.5.7] - 2026-03-21
+
+### 🔄 Changed
+- **浏览器**
+  - 扩展拟人点击策略并增强坐标安全性
+
 ## [3.5.6] - 2026-03-20
 
 ### 🐛 Fixed

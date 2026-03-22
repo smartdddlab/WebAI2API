@@ -97,7 +97,7 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
         const modelMenuName = MODEL_MENU_MAP[modelId] || MODEL_MENU_MAP['seed'];
         logger.debug('适配器', `选择模型: ${modelId} -> ${modelMenuName}`, meta);
 
-        const modelSelectorBtn = page.locator('div[data-testid="deep-thinking-action-button"]');
+        const modelSelectorBtn = page.locator('main button[aria-haspopup="menu"]:has(div[data-testid="deep-thinking-action-button"])');
         const selectorExists = await modelSelectorBtn.count() > 0;
 
         if (selectorExists) {
