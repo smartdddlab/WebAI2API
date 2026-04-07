@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.4] - 2026-04-07
+
+### ✨ Added
+- **适配器**
+  - 支持 thinking/reasoning 提取与传递（豆包、Gemini 等）
+  - 智能错误检测与 retryable 标记传播
+  - Gemini 图片生成返回全尺寸原图
+- **API**
+  - buildChatCompletion/buildChatCompletionChunk 支持 reasoning_content 透传
+
+### 🐛 Fixed
+- **适配器**
+  - 修复豆包图片适配器 SSE 解析失败的问题（适配三层嵌套 JSON 格式）
+  - 修复豆包文本适配器模型选择菜单偶尔不弹出的问题（增加重试逻辑）
+  - 修复 Playwright TimeoutError 错误提示不准确的问题（改为页面操作超时）
+  - 新增 CLICK_TIMEOUT 错误归一化处理
+  - 修复 LMArena 域名更新为 arena.ai
+
 ## [3.6.3] - 2025-04-05
 
 ### 🐛 Fixed
