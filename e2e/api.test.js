@@ -40,7 +40,7 @@ async function apiRequest(path, options = {}) {
     return fetch(url, { ...options, headers });
 }
 
-/** 解析 SSE 文本为 chunk 数组 */
+/** 解析 Chat Completions SSE 文本为 chunk 数组 */
 function parseSSE(body) {
     const chunks = [];
     for (const line of body.split('\n')) {
@@ -55,6 +55,25 @@ function parseSSE(body) {
         }
     }
     return chunks;
+}
+
+/** 解析 Responses API SSE 文本为 event 数组 */
+function parseResponsesSSE(body) {
+    const events = [];
+    const lines = body.split('\n');
+    let currentEvent = '';
+    for (const line of lines) {
+        if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            try {
+                events.push({ event: currentEvent, data: JSON.parse(data) });
+            } catch { /* 忽略非 JSON 行 */ }
+            currentEvent = '';
+        }
+    }
+    return events;
 }
 
 // --- 测试 ---
@@ -198,5 +217,74 @@ test.describe('POST /v1/chat/completions', () => {
         expect(resp.status).toBe(400);
         const body = await resp.json();
         expect(body.error).toBeTruthy();
+    });
+});
+
+test.describe('POST /v1/responses', () => {
+    test('非流式请求返回正确格式', async () => {
+        const resp = await apiRequest('/v1/responses', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: MODEL,
+                input: [{ role: 'user', content: 'Reply with exactly: hello' }],
+                stream: false,
+            }),
+        });
+
+        expect(resp.status).toBe(200);
+        const body = await resp.json();
+
+        // Responses API 格式验证
+        expect(body.id).toBeTruthy();
+        expect(body.id.startsWith('resp_')).toBe(true);
+        expect(body.object).toBe('response');
+        expect(body.status).toBe('completed');
+        expect(body.model).toBe(MODEL);
+        expect(Array.isArray(body.output)).toBe(true);
+        expect(body.output.length).toBeGreaterThan(0);
+
+        // 最后一个 output 应该是 message 类型
+        const message = body.output.find(o => o.type === 'message');
+        expect(message).toBeTruthy();
+        expect(message.role).toBe('assistant');
+        expect(message.content[0].type).toBe('output_text');
+        expect(message.content[0].text).toBeTruthy();
+
+        console.log(`[Responses 非流式] 回复: ${message.content[0].text.slice(0, 80)}`);
+    });
+
+    test('流式请求返回 SSE 并最终完成', async () => {
+        const resp = await apiRequest('/v1/responses', {
+            method: 'POST',
+            body: JSON.stringify({
+                model: MODEL,
+                input: [{ role: 'user', content: 'Reply with exactly: hi' }],
+                stream: true,
+            }),
+        });
+
+        expect(resp.status).toBe(200);
+        expect(resp.headers.get('content-type')).toContain('text/event-stream');
+
+        // 读取完整响应后解析 SSE
+        const body = await resp.text();
+        const events = parseResponsesSSE(body);
+
+        // 应该有 response.created 事件
+        const created = events.find(e => e.event === 'response.created');
+        expect(created).toBeTruthy();
+
+        // 应该有 delta 事件
+        const deltas = events.filter(e => e.event === 'response.output_text.delta');
+        expect(deltas.length).toBeGreaterThan(0);
+        const fullText = deltas.map(e => e.data.delta).join('');
+        expect(fullText.length).toBeGreaterThan(0);
+
+        // 应该有 response.completed 事件
+        const completed = events.find(e => e.event === 'response.completed');
+        expect(completed).toBeTruthy();
+        expect(completed.data.response.status).toBe('completed');
+
+        console.log(`[Responses 流式] 回复 (${deltas.length} deltas): ${fullText.slice(0, 80)}`);
     });
 });
