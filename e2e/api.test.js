@@ -288,3 +288,60 @@ test.describe('POST /v1/responses', () => {
         console.log(`[Responses 流式] 回复 (${deltas.length} deltas): ${fullText.slice(0, 80)}`);
     });
 });
+
+test.describe('持续性对话', () => {
+    test('连续多次请求均成功（复用浏览器会话）', async () => {
+        const prompts = [
+            'Reply with exactly: first',
+            'Reply with exactly: second',
+            'Reply with exactly: third',
+        ];
+
+        for (let i = 0; i < prompts.length; i++) {
+            const resp = await apiRequest('/v1/chat/completions', {
+                method: 'POST',
+                body: JSON.stringify({
+                    model: MODEL,
+                    messages: [{ role: 'user', content: prompts[i] }],
+                    stream: false,
+                }),
+            });
+
+            expect(resp.status).toBe(200);
+            const body = await resp.json();
+            expect(body.object).toBe('chat.completion');
+            expect(body.choices[0].message.content).toBeTruthy();
+
+            console.log(`[持续对话 ${i + 1}/${prompts.length}] 回复: ${body.choices[0].message.content.slice(0, 80)}`);
+        }
+    });
+
+    test('Responses API 连续多次请求均成功', async () => {
+        const prompts = [
+            'Reply with exactly: alpha',
+            'Reply with exactly: beta',
+        ];
+
+        for (let i = 0; i < prompts.length; i++) {
+            const resp = await apiRequest('/v1/responses', {
+                method: 'POST',
+                body: JSON.stringify({
+                    model: MODEL,
+                    input: [{ role: 'user', content: prompts[i] }],
+                    stream: false,
+                }),
+            });
+
+            expect(resp.status).toBe(200);
+            const body = await resp.json();
+            expect(body.object).toBe('response');
+            expect(body.status).toBe('completed');
+
+            const message = body.output.find(o => o.type === 'message');
+            expect(message).toBeTruthy();
+            expect(message.content[0].text).toBeTruthy();
+
+            console.log(`[Responses 持续 ${i + 1}/${prompts.length}] 回复: ${message.content[0].text.slice(0, 80)}`);
+        }
+    });
+});
