@@ -26,6 +26,7 @@ const MODE_EXPERT = ['专家模式', 'Expert'];
 // --- 功能按钮名称 (中英文兼容) ---
 const BTN_THINKING = ['深度思考', 'DeepThink'];
 const BTN_SEARCH = ['智能搜索', 'Search'];
+const BTN_NEW_CHAT = ['新对话', 'New Chat'];
 
 /**
  * 按名称列表查找并操作 Playwright locator (兼容中英文)
@@ -145,8 +146,40 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
     const waitTimeout = config?.backend?.pool?.waitTimeout ?? 120000;
 
     try {
-        logger.info('适配器', '开启新会话...', meta);
-        await gotoWithCheck(page, TARGET_URL);
+        // 智能导航：如果已在 DeepSeek 页面，点击新对话按钮而非全页面导航
+        const currentUrl = page.url();
+        const isOnDeepSeek = currentUrl.includes('chat.deepseek.com');
+        if (isOnDeepSeek) {
+            logger.info('适配器', '已在 DeepSeek 页面，点击新对话...', meta);
+            let clicked = false;
+            // 策略1: 查找新对话按钮 (中英文)
+            try {
+                const newChatBtn = await findByName(page, BTN_NEW_CHAT, 'button');
+                if (newChatBtn) {
+                    await newChatBtn.click();
+                    clicked = true;
+                    await sleep(500, 800);
+                }
+            } catch { /* 忽略 */ }
+            // 策略2: 查找链接到首页的新对话链接
+            if (!clicked) {
+                try {
+                    const newChatLink = page.locator(`a[href="${TARGET_URL}"]`).first();
+                    if (await newChatLink.count() > 0) {
+                        await newChatLink.click();
+                        clicked = true;
+                        await sleep(500, 800);
+                    }
+                } catch { /* 忽略 */ }
+            }
+            // 策略3: 回退到全页面导航
+            if (!clicked) {
+                await gotoWithCheck(page, TARGET_URL);
+            }
+        } else {
+            logger.info('适配器', '导航到 DeepSeek...', meta);
+            await gotoWithCheck(page, TARGET_URL);
+        }
 
         // 1. 等待输入框加载
         await waitForInput(page, INPUT_SELECTOR, { click: false });
