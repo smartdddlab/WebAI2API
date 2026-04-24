@@ -26,7 +26,6 @@ const MODE_EXPERT = ['专家模式', 'Expert'];
 // --- 功能按钮名称 (中英文兼容) ---
 const BTN_THINKING = ['深度思考', 'DeepThink'];
 const BTN_SEARCH = ['智能搜索', 'Search'];
-const BTN_NEW_CHAT = ['新对话', 'New Chat'];
 
 /**
  * 按名称列表查找并操作 Playwright locator (兼容中英文)
@@ -174,21 +173,11 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
         try {
             await safeClick(page, INPUT_SELECTOR, { bias: 'input' });
         } catch (clickErr) {
-            // 点击失败（对话过长导致 textarea 不可交互），尝试点击新对话按钮重置
-            logger.warn('适配器', `输入框点击失败，尝试重置对话: ${clickErr.message}`, meta);
-            try {
-                const newChatBtn = await findByName(page, BTN_NEW_CHAT, 'button');
-                if (newChatBtn) {
-                    await newChatBtn.click();
-                    await sleep(800, 1200);
-                    await waitForInput(page, INPUT_SELECTOR, { click: false });
-                    await safeClick(page, INPUT_SELECTOR, { bias: 'input' });
-                } else {
-                    throw clickErr; // 没有新对话按钮，抛出原始错误
-                }
-            } catch {
-                throw clickErr; // 重试失败，抛出原始错误
-            }
+            // 点击失败（对话过长导致 textarea 不可交互），导航到首页重置
+            logger.warn('适配器', `输入框点击失败，导航到首页重置: ${clickErr.message}`, meta);
+            await gotoWithCheck(page, TARGET_URL);
+            await waitForInput(page, INPUT_SELECTOR, { click: false });
+            await safeClick(page, INPUT_SELECTOR, { bias: 'input' });
         }
         await humanType(page, INPUT_SELECTOR, prompt);
         await sleep(300, 500);
