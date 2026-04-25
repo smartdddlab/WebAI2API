@@ -351,6 +351,16 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
         try {
             await responsePromise;
         } catch (e) {
+            // 区分"等待模型响应超时"和"页面操作超时"
+            if (e.name === 'TimeoutError' || e.message?.includes('Timeout')) {
+                const waitSec = Math.round(waitTimeout / 1000);
+                logger.warn('适配器', `等待模型响应超时 (已等待 ${waitSec}s)，复杂模型可能需要更长时间`, meta);
+                return {
+                    error: `模型响应超时（已等待 ${waitSec} 秒），复杂模型可能需要更长时间处理，请增加 waitTimeout 配置或重试`,
+                    code: 'TIMEOUT_ERROR',
+                    retryable: true
+                };
+            }
             const pageError = normalizePageError(e, meta);
             if (pageError) return pageError;
             throw e;
