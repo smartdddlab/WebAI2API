@@ -17,7 +17,7 @@ import {
 import { logger } from '../../utils/logger.js';
 
 // --- 配置常量 ---
-const TARGET_URL = 'https://www.doubao.com/chat/';
+const TARGET_URL = 'https://www.doubao.com/chat/create-image';
 
 /**
  * 执行图片生成任务
@@ -36,31 +36,30 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
     const { codeName } = modelConfig;
 
     try {
-        logger.info('适配器', '开启新会话...', meta);
+        logger.info('适配器', '导航到 AI 创作页面...', meta);
         await gotoWithCheck(page, TARGET_URL);
 
-        // 1. 点击进入图片生成模式
-        logger.debug('适配器', '进入图片生成模式...', meta);
-        const skillBtn = page.locator('button[data-testid="skill_bar_button_3"]');
-        await skillBtn.waitFor({ state: 'visible', timeout: 30000 });
-        await safeClick(page, skillBtn, { bias: 'button' });
+        // 1. 选择模型 (如果当前模型不匹配)
+        logger.debug('适配器', `检查模型: ${codeName}...`, meta);
+        const currentModelBtn = page.getByRole('button', { name: codeName });
+        if (await currentModelBtn.count() === 0) {
+            // 当前不是目标模型，点击模型按钮打开选择器
+            const modelSelector = page.locator('button').filter({ hasText: /Seedream|模型/ }).first();
+            if (await modelSelector.count() > 0) {
+                await safeClick(page, modelSelector, { bias: 'button' });
+                await sleep(300, 500);
+                const targetModel = page.getByRole('button', { name: codeName });
+                if (await targetModel.count() > 0) {
+                    await safeClick(page, targetModel, { bias: 'button' });
+                    await sleep(300, 500);
+                }
+            }
+        }
 
-        // 2. 选择模型
-        logger.debug('适配器', `选择模型: ${codeName}...`, meta);
-        const modelBtn = page.locator('button[data-testid="image-creation-chat-input-picture-model-button"]');
-        await modelBtn.waitFor({ state: 'visible', timeout: 10000 });
-        await safeClick(page, modelBtn, { bias: 'button' });
-        await sleep(300, 500);
-
-        const modelOption = page.getByRole('menuitem', { name: codeName });
-        await modelOption.waitFor({ state: 'visible', timeout: 5000 });
-        await safeClick(page, modelOption, { bias: 'button' });
-
-        // 3. 上传参考图片 (如果有)
+        // 2. 上传参考图片 (如果有)
         if (imgPaths && imgPaths.length > 0) {
-            logger.info('适配器', `开始上传 ${imgPaths.length} 张图片...`, meta);
+            logger.info('适配器', `开始上传 ${imgPaths.length} 张参考图片...`, meta);
 
-            // 预先拦截 ApplyImageUpload 响应，动态收集实际上传路径
             const expectedUploadPaths = new Set();
             const applyUploadHandler = async (response) => {
                 try {
@@ -77,7 +76,7 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
             page.on('response', applyUploadHandler);
 
             try {
-                const uploadBtn = page.locator('button[data-testid="image-creation-chat-input-picture-reference-button"]');
+                const uploadBtn = page.getByRole('button', { name: '参考图' });
                 await uploadBtn.waitFor({ state: 'visible', timeout: 10000 });
 
                 await uploadFilesViaChooser(page, uploadBtn, imgPaths, {
@@ -94,15 +93,15 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
                 page.off('response', applyUploadHandler);
             }
 
-            logger.info('适配器', '图片上传完成', meta);
+            logger.info('适配器', '参考图片上传完成', meta);
         }
 
-        // 4. 填写提示词
-        const inputLocator = page.locator('div[data-testid="chat_input_input"][role="textbox"]');
+        // 3. 填写提示词
+        const inputLocator = page.getByRole('textbox');
         await waitForInput(page, inputLocator, { click: true });
         await humanType(page, inputLocator, prompt);
 
-        // 5. 设置 SSE 监听
+        // 4. 设置 SSE 监听
         logger.debug('适配器', '启动 SSE 监听...', meta);
 
         let imageUrl = null;
@@ -145,13 +144,11 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
             page.on('response', handleResponse);
         });
 
-        // 6. 点击发送
-        const sendBtn = page.locator('button[data-testid="chat_input_send_button"]');
-        await sendBtn.waitFor({ state: 'visible', timeout: 10000 });
-        logger.info('适配器', '点击发送...', meta);
-        await safeClick(page, sendBtn, { bias: 'button' });
+        // 5. 按 Enter 发送
+        logger.info('适配器', '按 Enter 发送...', meta);
+        await page.keyboard.press('Enter');
 
-        // 7. 等待响应
+        // 6. 等待响应
         logger.info('适配器', '等待图片生成...', meta);
         await resultPromise;
 
