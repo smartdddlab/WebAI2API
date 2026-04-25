@@ -11,7 +11,8 @@ import {
     sendHeartbeat,
     sendApiError,
     buildChatCompletion,
-    buildChatCompletionChunk
+    buildChatCompletionChunk,
+    createChunkBuilder
 } from './respond.js';
 import { ERROR_CODES } from './errors.js';
 import { incrementSuccess, incrementFailed } from '../utils/stats.js';
@@ -132,11 +133,63 @@ export function createQueueManager(queueConfig, callbacks) {
                 poolContext = await initBrowser(config);
             }
 
-            // 调用核心生图逻辑 (通过 Pool 分发)
-            const result = await generate(poolContext, prompt, imagePaths, modelId, { id, reasoning });
+            // === 流式回调（仅流式请求） ===
+            let accumulatedContent = '';
+            let accumulatedReasoning = '';
+            let streamed = false;
+
+            // 创建 chunk 构建器（需要在 onChunk 之前定义）
+            const buildChunk = createChunkBuilder(modelName);
+
+            const onChunk = isStreaming ? (event) => {
+                if (res.writableEnded) return;
+
+                if (event.type === 'content' && event.content) {
+                    accumulatedContent += event.content;
+                    const chunk = buildChunk({ content: event.content });
+                    sendSse(res, chunk);
+                } else if (event.type === 'thinking' && event.content) {
+                    accumulatedReasoning += event.content;
+                    const chunk = buildChunk({ reasoningContent: event.content });
+                    sendSse(res, chunk);
+                } else if (event.type === 'done') {
+                    const finalChunk = buildChunk({ finishReason: 'stop' });
+                    sendSse(res, finalChunk);
+                    sendSseDone(res);
+                    streamed = true;
+                    logger.info('服务器', '流式响应已结束', { id });
+                } else if (event.type === 'error') {
+                    sendApiError(res, {
+                        code: ERROR_CODES.GENERATION_FAILED,
+                        message: event.error,
+                        isStreaming: true
+                    });
+                }
+            } : null;
+
+            // 调用核心生成逻辑 (通过 Pool 分发)
+            const result = await generate(poolContext, prompt, imagePaths, modelId, {
+                id, reasoning, onChunk
+            });
 
             // 清除心跳
             if (heartbeatInterval) clearInterval(heartbeatInterval);
+
+            // 如果已通过流式发送完成，直接返回
+            if (streamed) {
+                await incrementSuccess();
+                try {
+                    updateRecord(id, {
+                        status: 'success',
+                        responseText: accumulatedContent,
+                        reasoningContent: accumulatedReasoning || null,
+                        durationMs: Date.now() - startTime
+                    });
+                } catch (e) {
+                    logger.debug('服务器', `更新历史记录失败: ${e.message}`);
+                }
+                return;
+            }
 
             // 处理结果
             if (result.error) {
@@ -160,7 +213,7 @@ export function createQueueManager(queueConfig, callbacks) {
                 return;
             }
 
-            // 生成成功
+            // 生成成功（非流式路径）
             let finalContent = '';
             let reasoningContent = null;  // 思考过程内容
             let historyResponseText = '';  // 历史记录中存储的文本（不含 base64）
@@ -200,18 +253,11 @@ export function createQueueManager(queueConfig, callbacks) {
                 logger.debug('服务器', `处理响应媒体失败: ${e.message}`);
             });
 
-            // 发送成功响应
+            // 发送成功响应（非流式）
             logger.info('服务器', '准备发送响应...', { id, isStreaming, contentLength: finalContent.length, hasReasoning: !!reasoningContent });
-            if (isStreaming) {
-                const chunk = buildChatCompletionChunk(finalContent, modelName, 'stop', reasoningContent);
-                sendSse(res, chunk);
-                sendSseDone(res);
-                logger.info('服务器', '流式响应已结束', { id });
-            } else {
-                const response = buildChatCompletion(finalContent, modelName, reasoningContent);
-                sendJson(res, 200, response);
-                logger.info('服务器', 'JSON 响应已发送', { id });
-            }
+            const response = buildChatCompletion(finalContent, modelName, reasoningContent);
+            sendJson(res, 200, response);
+            logger.info('服务器', 'JSON 响应已发送', { id });
 
         } catch (err) {
             // 清除心跳

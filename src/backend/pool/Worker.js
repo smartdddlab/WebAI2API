@@ -617,6 +617,14 @@ export class Worker {
             }
             return 'image';
         } else {
+            // 支持 type/model 格式
+            if (modelKey.includes('/')) {
+                const [specifiedType, actualModel] = modelKey.split('/', 2);
+                if (specifiedType === this.type) {
+                    return registry.getModelType(this.type, actualModel);
+                }
+                return 'image';
+            }
             return registry.getModelType(this.type, modelKey);
         }
     }

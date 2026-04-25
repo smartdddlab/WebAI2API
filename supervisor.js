@@ -393,6 +393,27 @@ async function main() {
     const isInXvfb = process.env.XVFB_RUNNING === 'true';
     const isLinux = os.platform() === 'linux';
 
+    // 单实例检查：尝试连接已有 IPC 服务器
+    if (!isInXvfb) {
+        const isAlreadyRunning = await new Promise((resolve) => {
+            const client = net.createConnection(IPC_PATH, () => {
+                client.end();
+                resolve(true);
+            });
+            client.on('error', () => resolve(false));
+            client.setTimeout(1000, () => {
+                client.destroy();
+                resolve(false);
+            });
+        });
+
+        if (isAlreadyRunning) {
+            log('ERROR', '检测到已有 supervisor 实例正在运行，请勿重复启动');
+            log('ERROR', `如需重启，请使用 IPC 指令: echo "RESTART" | socat - UNIX-CONNECT:${IPC_PATH}`);
+            process.exit(1);
+        }
+    }
+
     log('INFO', '主进程已启动');
 
     // 处理 Xvfb 参数（仅 Linux）

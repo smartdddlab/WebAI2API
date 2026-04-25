@@ -157,3 +157,51 @@ export function buildChatCompletionChunk(content, modelName, finishReason = 'sto
         }]
     };
 }
+
+/**
+ * 创建流式 chunk 构建器（维护请求级别的状态）
+ * @param {string} modelName - 模型名称
+ * @returns {function} chunk 构建函数
+ */
+export function createChunkBuilder(modelName) {
+    const requestId = 'chatcmpl-' + Date.now();
+    const created = Math.floor(Date.now() / 1000);
+    let isFirstChunk = true;
+
+    /**
+     * 构建流式 chunk
+     * @param {object} options
+     * @param {string} [options.content] - 文本内容 delta
+     * @param {string} [options.reasoningContent] - 思考过程 delta
+     * @param {string|null} [options.finishReason] - 完成原因
+     * @returns {object} OpenAI 格式的流式响应块
+     */
+    return function buildChunk({ content, reasoningContent, finishReason } = {}) {
+        const delta = {};
+
+        // 首个 chunk 添加 role
+        if (isFirstChunk) {
+            delta.role = 'assistant';
+            isFirstChunk = false;
+        }
+
+        if (content !== undefined && content !== null) {
+            delta.content = content;
+        }
+        if (reasoningContent !== undefined && reasoningContent !== null) {
+            delta.reasoning_content = reasoningContent;
+        }
+
+        return {
+            id: requestId,
+            object: 'chat.completion.chunk',
+            created,
+            model: modelName || 'default-model',
+            choices: [{
+                index: 0,
+                delta,
+                finish_reason: finishReason || null
+            }]
+        };
+    };
+}

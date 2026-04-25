@@ -329,24 +329,29 @@ test.describe('持续性对话', () => {
         });
         expect(resp1.status).toBe(200);
         const body1 = await resp1.json();
-        console.log(`[上下文 1/2] 回复: ${body1.choices[0].message.content.slice(0, 80)}`);
+        const reply1 = body1.choices[0].message.content;
+        console.log(`[上下文 1/2] 回复: ${reply1.slice(0, 80)}`);
 
-        // 第二轮：问模型之前记住的词（不重复提示）
+        // 第二轮：携带完整历史上下文（标准 Chat Completions API 要求每次请求包含完整 messages）
         const resp2 = await apiRequest('/v1/chat/completions', {
             method: 'POST',
             body: JSON.stringify({
                 model: MODEL,
-                messages: [{ role: 'user', content: 'What word did I ask you to remember? Reply with only the word.' }],
+                messages: [
+                    { role: 'user', content: `Remember this word: ${uniqueId}. Reply with exactly: remembered` },
+                    { role: 'assistant', content: reply1 },
+                    { role: 'user', content: 'What word did I ask you to remember? Reply with only the word.' },
+                ],
                 stream: false,
             }),
         });
         expect(resp2.status).toBe(200);
         const body2 = await resp2.json();
-        const reply = body2.choices[0].message.content;
-        console.log(`[上下文 2/2] 回复: ${reply.slice(0, 80)}`);
+        const reply2 = body2.choices[0].message.content;
+        console.log(`[上下文 2/2] 回复: ${reply2.slice(0, 80)}`);
 
         // 验证模型记住了之前的词
-        expect(reply.toLowerCase()).toContain(uniqueId.toLowerCase());
+        expect(reply2.toLowerCase()).toContain(uniqueId.toLowerCase());
     });
 
     test('Responses API 连续多次请求均成功', async () => {

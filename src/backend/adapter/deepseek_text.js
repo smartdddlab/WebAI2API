@@ -132,32 +132,169 @@ async function configureModel(page, modelConfig, meta = {}) {
 }
 
 /**
+ * 处理单条 SSE 数据（从 DeepSeek 响应中解析）
+ * @param {object} data - 解析后的 JSON 数据
+ * @param {object} state - 状态对象 { isCollecting, isCollectingThinking, textContent, thinkingContent, isComplete }
+ * @param {function} [onChunk] - 可选的流式回调
+ */
+function processSseData(data, state, onChunk) {
+    // --- 处理 fragment 列表变更，更新 isCollecting 状态 ---
+
+    // 初始响应中可能已有 fragments (如 THINK / SEARCH / RESPONSE)
+    if (data.v?.response?.fragments && Array.isArray(data.v.response.fragments)) {
+        for (const fragment of data.v.response.fragments) {
+            if (fragment.type === 'RESPONSE') {
+                state.isCollecting = true;
+                state.isCollectingThinking = false;
+                if (fragment.content) {
+                    state.textContent += fragment.content;
+                    if (onChunk) onChunk({ type: 'content', content: fragment.content });
+                }
+            } else if (fragment.type === 'THINK') {
+                state.isCollectingThinking = true;
+                state.isCollecting = false;
+                if (fragment.content) {
+                    state.thinkingContent += fragment.content;
+                    if (onChunk) onChunk({ type: 'thinking', content: fragment.content });
+                }
+            } else {
+                state.isCollecting = false;
+                state.isCollectingThinking = false;
+            }
+        }
+    }
+
+    // fragments APPEND - 新增 fragment (非 BATCH)
+    if (data.p === 'response/fragments' && data.o === 'APPEND' && Array.isArray(data.v)) {
+        for (const fragment of data.v) {
+            if (fragment.type === 'RESPONSE') {
+                state.isCollecting = true;
+                state.isCollectingThinking = false;
+                if (fragment.content) {
+                    state.textContent += fragment.content;
+                    if (onChunk) onChunk({ type: 'content', content: fragment.content });
+                }
+            } else if (fragment.type === 'THINK') {
+                state.isCollectingThinking = true;
+                state.isCollecting = false;
+                if (fragment.content) {
+                    state.thinkingContent += fragment.content;
+                    if (onChunk) onChunk({ type: 'thinking', content: fragment.content });
+                }
+            } else {
+                state.isCollecting = false;
+                state.isCollectingThinking = false;
+            }
+        }
+    }
+
+    // BATCH 操作中的 fragments
+    if (data.o === 'BATCH' && data.p === 'response' && Array.isArray(data.v)) {
+        for (const item of data.v) {
+            if (item.p === 'fragments' && item.o === 'APPEND' && Array.isArray(item.v)) {
+                for (const fragment of item.v) {
+                    if (fragment.type === 'RESPONSE') {
+                        state.isCollecting = true;
+                        state.isCollectingThinking = false;
+                        if (fragment.content) {
+                            state.textContent += fragment.content;
+                            if (onChunk) onChunk({ type: 'content', content: fragment.content });
+                        }
+                    } else if (fragment.type === 'THINK') {
+                        state.isCollectingThinking = true;
+                        state.isCollecting = false;
+                        if (fragment.content) {
+                            state.thinkingContent += fragment.content;
+                            if (onChunk) onChunk({ type: 'thinking', content: fragment.content });
+                        }
+                    } else {
+                        state.isCollecting = false;
+                        state.isCollectingThinking = false;
+                    }
+                }
+            }
+            // 检查是否完成 (quasi_status 或 status)
+            if ((item.p === 'status' || item.p === 'quasi_status') && item.v === 'FINISHED') {
+                state.isComplete = true;
+            }
+        }
+    }
+
+    // --- 处理文本内容追加 ---
+
+    // 带路径的 content 操作 (如 response/fragments/-1/content)
+    if (data.p && typeof data.v === 'string') {
+        const match = data.p.match(/response\/fragments\/(-?\d+)\/content/);
+        if (match) {
+            if (state.isCollecting) {
+                state.textContent += data.v;
+                if (onChunk) onChunk({ type: 'content', content: data.v });
+            } else if (state.isCollectingThinking) {
+                state.thinkingContent += data.v;
+                if (onChunk) onChunk({ type: 'thinking', content: data.v });
+            }
+        }
+    }
+
+    // 纯文本追加 (只有 v 字符串，没有 p 和 o)
+    if (data.v && typeof data.v === 'string' && !data.p && !data.o) {
+        if (state.isCollecting) {
+            state.textContent += data.v;
+            if (onChunk) onChunk({ type: 'content', content: data.v });
+        } else if (state.isCollectingThinking) {
+            state.thinkingContent += data.v;
+            if (onChunk) onChunk({ type: 'thinking', content: data.v });
+        }
+    }
+
+    // --- 检查完成信号 ---
+
+    // 独立的 status SET 操作
+    if (data.p === 'response/status' && data.o === 'SET' && data.v === 'FINISHED') {
+        state.isComplete = true;
+    }
+}
+
+/**
+ * 解析 SSE 响应体
+ * @param {string} body - 响应体文本
+ * @param {object} state - 状态对象
+ * @param {function} [onChunk] - 可选的流式回调
+ */
+function parseSseBody(body, state, onChunk) {
+    const lines = body.split('\n');
+    for (const line of lines) {
+        if (line.startsWith('event:') || !line.startsWith('data:')) continue;
+        const dataStr = line.slice(5).trim();
+        if (!dataStr || dataStr === '{}') continue;
+        try {
+            const data = JSON.parse(dataStr);
+            processSseData(data, state, onChunk);
+        } catch {
+            // 忽略解析错误
+        }
+    }
+}
+
+/**
  * 执行文本生成任务
  * @param {object} context - 浏览器上下文 { page, config }
  * @param {string} prompt - 提示词
  * @param {string[]} imgPaths - 图片路径数组 (此适配器不支持)
  * @param {string} [modelId] - 模型 ID
- * @param {object} [meta={}] - 日志元数据
- * @returns {Promise<{text?: string, reasoning?: string, error?: string}>}
+ * @param {object} [meta={}] - 日志元数据 (可包含 onChunk 回调用于流式)
+ * @returns {Promise<{text?: string, reasoning?: string, error?: string, streamed?: boolean}>}
  */
 async function generate(context, prompt, imgPaths, modelId, meta = {}) {
     const { page, config } = context;
     const waitTimeout = config?.backend?.pool?.waitTimeout ?? 120000;
+    const onChunk = meta.onChunk;  // 可选的流式回调
 
     try {
-        // 智能导航：如果已在 DeepSeek 对话页面，直接继续对话；否则导航到首页
-        const currentUrl = page.url();
-        const isOnDeepSeek = currentUrl.includes('chat.deepseek.com');
-        const isInConversation = isOnDeepSeek && currentUrl !== TARGET_URL && currentUrl !== TARGET_URL.slice(0, -1);
-        if (isInConversation) {
-            logger.info('适配器', '继续当前对话...', meta);
-        } else if (isOnDeepSeek) {
-            // 在首页但没有对话，直接使用
-            logger.info('适配器', '已在 DeepSeek 首页，开始新对话...', meta);
-        } else {
-            logger.info('适配器', '导航到 DeepSeek...', meta);
-            await gotoWithCheck(page, TARGET_URL);
-        }
+        // 每次请求都导航到首页，创建新对话（符合标准 Chat Completions API 无状态语义）
+        // parseTextRequest 已将完整历史构建到 prompt 中，无需依赖 DeepSeek 的对话状态
+        logger.info('适配器', '导航到 DeepSeek 首页，创建新对话...', meta);
+        await gotoWithCheck(page, TARGET_URL);
 
         // 1. 等待输入框加载
         await waitForInput(page, INPUT_SELECTOR, { click: false });
@@ -182,14 +319,19 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
         await humanType(page, INPUT_SELECTOR, prompt);
         await sleep(300, 500);
 
-        // 4. 先启动 API 监听
-        logger.debug('适配器', '启动 API 监听...', meta);
+        // 4. 发送提示词
+        logger.debug('适配器', '发送提示词...', meta);
+        await page.keyboard.press('Enter');
+        logger.info('适配器', '等待生成结果...', meta);
 
-        let textContent = '';
-        let thinkingContent = '';  // thinking 内容
-        let isComplete = false;
-        let isCollecting = false;  // 当前最后一个 fragment 是否为 RESPONSE 类型
-        let isCollectingThinking = false;  // 是否正在收集 thinking
+        // 5. 等待完整 SSE 响应（流式和非流式共用同一等待逻辑）
+        const state = {
+            isCollecting: false,
+            isCollectingThinking: false,
+            textContent: '',
+            thinkingContent: '',
+            isComplete: false
+        };
 
         const responsePromise = page.waitForResponse(async (response) => {
             const url = response.url();
@@ -199,130 +341,13 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
 
             try {
                 const body = await response.text();
-                const lines = body.split('\n');
-
-                for (const line of lines) {
-                    // 跳过事件行和空行
-                    if (line.startsWith('event:') || !line.startsWith('data:')) continue;
-
-                    const dataStr = line.slice(5).trim();
-                    if (!dataStr || dataStr === '{}') continue;
-
-                    try {
-                        const data = JSON.parse(dataStr);
-
-                        // --- 处理 fragment 列表变更，更新 isCollecting 状态 ---
-
-                        // 初始响应中可能已有 fragments (如 THINK / SEARCH / RESPONSE)
-                        if (data.v?.response?.fragments && Array.isArray(data.v.response.fragments)) {
-                            for (const fragment of data.v.response.fragments) {
-                                if (fragment.type === 'RESPONSE') {
-                                    isCollecting = true;
-                                    isCollectingThinking = false;
-                                    if (fragment.content) textContent += fragment.content;
-                                } else if (fragment.type === 'THINK') {
-                                    // DeepSeek 使用 THINK (不是 THINKING)
-                                    isCollectingThinking = true;
-                                    isCollecting = false;
-                                    if (fragment.content) thinkingContent += fragment.content;
-                                } else {
-                                    isCollecting = false;
-                                    isCollectingThinking = false;
-                                }
-                            }
-                        }
-
-                        // fragments APPEND - 新增 fragment (非 BATCH)
-                        if (data.p === 'response/fragments' && data.o === 'APPEND' && Array.isArray(data.v)) {
-                            for (const fragment of data.v) {
-                                if (fragment.type === 'RESPONSE') {
-                                    isCollecting = true;
-                                    isCollectingThinking = false;
-                                    if (fragment.content) textContent += fragment.content;
-                                } else if (fragment.type === 'THINK') {
-                                    isCollectingThinking = true;
-                                    isCollecting = false;
-                                    if (fragment.content) thinkingContent += fragment.content;
-                                } else {
-                                    isCollecting = false;
-                                    isCollectingThinking = false;
-                                }
-                            }
-                        }
-
-                        // BATCH 操作中的 fragments
-                        if (data.o === 'BATCH' && data.p === 'response' && Array.isArray(data.v)) {
-                            for (const item of data.v) {
-                                if (item.p === 'fragments' && item.o === 'APPEND' && Array.isArray(item.v)) {
-                                    for (const fragment of item.v) {
-                                        if (fragment.type === 'RESPONSE') {
-                                            isCollecting = true;
-                                            isCollectingThinking = false;
-                                            if (fragment.content) textContent += fragment.content;
-                                        } else if (fragment.type === 'THINK') {
-                                            isCollectingThinking = true;
-                                            isCollecting = false;
-                                            if (fragment.content) thinkingContent += fragment.content;
-                                        } else {
-                                            isCollecting = false;
-                                            isCollectingThinking = false;
-                                        }
-                                    }
-                                }
-                                // 检查是否完成 (quasi_status 或 status)
-                                if ((item.p === 'status' || item.p === 'quasi_status') && item.v === 'FINISHED') {
-                                    isComplete = true;
-                                }
-                            }
-                        }
-
-                        // --- 处理文本内容追加 ---
-
-                        // 带路径的 content 操作 (如 response/fragments/-1/content)
-                        if (data.p && typeof data.v === 'string') {
-                            const match = data.p.match(/response\/fragments\/(-?\d+)\/content/);
-                            if (match) {
-                                if (isCollecting) {
-                                    textContent += data.v;
-                                } else if (isCollectingThinking) {
-                                    thinkingContent += data.v;
-                                }
-                            }
-                        }
-
-                        // 纯文本追加 (只有 v 字符串，没有 p 和 o)
-                        if (data.v && typeof data.v === 'string' && !data.p && !data.o) {
-                            if (isCollecting) {
-                                textContent += data.v;
-                            } else if (isCollectingThinking) {
-                                thinkingContent += data.v;
-                            }
-                        }
-
-                        // --- 检查完成信号 ---
-
-                        // 独立的 status SET 操作
-                        if (data.p === 'response/status' && data.o === 'SET' && data.v === 'FINISHED') {
-                            isComplete = true;
-                        }
-                    } catch {
-                        // 忽略解析错误
-                    }
-                }
-
-                return isComplete;
+                parseSseBody(body, state);
+                return state.isComplete;
             } catch {
                 return false;
             }
         }, { timeout: waitTimeout });
 
-        // 5. 发送提示词
-        logger.debug('适配器', '发送提示词...', meta);
-        await page.keyboard.press('Enter');
-
-        logger.info('适配器', '等待生成结果...', meta);
-
-        // 6. 等待 API 响应
         try {
             await responsePromise;
         } catch (e) {
@@ -331,22 +356,33 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
             throw e;
         }
 
-        if (!textContent || textContent.trim() === '') {
+        if (!state.textContent || state.textContent.trim() === '') {
             logger.warn('适配器', '回复内容为空', meta);
             return { error: '回复内容为空' };
         }
 
-        logger.info('适配器', `已获取文本内容 (${textContent.length} 字符)`, meta);
-        logger.info('适配器', '文本生成完成，任务完成', meta);
+        const trimmedThinking = state.thinkingContent.trim();
+        const result = { text: state.textContent.trim() };
 
-        const trimmedThinking = thinkingContent.trim();
-        const result = { text: textContent.trim() };
-
-        // 返回结果（如果有 thinking 则包含 reasoning）
         if (trimmedThinking) {
             logger.info('适配器', `已获取思考过程 (${trimmedThinking.length} 字符)`, meta);
             result.reasoning = trimmedThinking;
         }
+
+        // 流式模式：通过 onChunk 发送思考过程和内容
+        if (onChunk) {
+            // 先发送思考过程
+            if (trimmedThinking) {
+                onChunk({ type: 'thinking', content: trimmedThinking });
+            }
+            // 发送文本内容
+            onChunk({ type: 'content', content: result.text });
+            // 标记完成
+            onChunk({ type: 'done' });
+            result.streamed = true;
+        }
+
+        logger.info('适配器', `已获取文本内容 (${state.textContent.length} 字符)`, meta);
         return result;
 
     } catch (err) {
@@ -374,15 +410,15 @@ export const manifest = {
     // 模型列表 (DeepSeek V4)
     models: [
         // 快速模式 (deepseek-v4-flash)
-        { id: 'deepseek-v4-flash', imagePolicy: 'forbidden' },
-        { id: 'deepseek-v4-flash-thinking', imagePolicy: 'forbidden', thinking: true },
-        { id: 'deepseek-v4-flash-search', imagePolicy: 'forbidden', search: true },
-        { id: 'deepseek-v4-flash-thinking-search', imagePolicy: 'forbidden', thinking: true, search: true },
+        { id: 'deepseek-v4-flash', type: 'text', imagePolicy: 'forbidden' },
+        { id: 'deepseek-v4-flash-thinking', type: 'text', imagePolicy: 'forbidden', thinking: true },
+        { id: 'deepseek-v4-flash-search', type: 'text', imagePolicy: 'forbidden', search: true },
+        { id: 'deepseek-v4-flash-thinking-search', type: 'text', imagePolicy: 'forbidden', thinking: true, search: true },
         // 专家模式 (deepseek-v4-pro)
-        { id: 'deepseek-v4-pro', imagePolicy: 'forbidden', expert: true },
-        { id: 'deepseek-v4-pro-thinking', imagePolicy: 'forbidden', expert: true, thinking: true },
-        { id: 'deepseek-v4-pro-search', imagePolicy: 'forbidden', expert: true, search: true },
-        { id: 'deepseek-v4-pro-thinking-search', imagePolicy: 'forbidden', expert: true, thinking: true, search: true },
+        { id: 'deepseek-v4-pro', type: 'text', imagePolicy: 'forbidden', expert: true },
+        { id: 'deepseek-v4-pro-thinking', type: 'text', imagePolicy: 'forbidden', expert: true, thinking: true },
+        { id: 'deepseek-v4-pro-search', type: 'text', imagePolicy: 'forbidden', expert: true, search: true },
+        { id: 'deepseek-v4-pro-thinking-search', type: 'text', imagePolicy: 'forbidden', expert: true, thinking: true, search: true },
     ],
 
     // 无需导航处理器
