@@ -18,6 +18,14 @@ export default defineConfig({
             testMatch: 'deepseek.test.js',
         },
         {
+            name: 'doubao_video',
+            use: {
+                browserName: 'chromium',
+                storageState: './data/doubao-auth.json',
+            },
+            testMatch: 'doubao_video.test.js',
+        },
+        {
             name: 'api',
             testMatch: 'api.test.js',
         },
